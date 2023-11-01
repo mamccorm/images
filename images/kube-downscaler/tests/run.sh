@@ -35,3 +35,25 @@ kubectl rollout status deployment/kube-downscaler --timeout=120s
 
 # Check the kube-downscaler pods are deployed and healthy
 kubectl wait --for=condition=ready pod --selector application=kube-downscaler --timeout=120s
+
+# Additional test to validate service is running, by querying logs
+expected_log="INFO: Downscaler v[0-9]+\.[0-9]+\.[0-9]+ started"
+retry_count=0
+max_retries=3
+delay=10
+
+while (( retry_count < max_retries )); do
+  if kubectl logs --selector application=kube-downscaler | grep -qE "$expected_log"; then
+    echo "INFO: kube-downscaler is running, found the following log line: $expected_log"
+    break
+  else
+    echo "ERROR: kube-downscaler - expected startup log line: $expected_log was NOT FOUND."
+    ((retry_count++))
+    sleep $delay
+  fi
+done
+
+if (( retry_count == max_retries )); then
+  echo "Error: Expected log string not found after $max_retries retries!"
+  exit 1
+fi
