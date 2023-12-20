@@ -34,20 +34,20 @@ module "helm_cleanup" {
 */
 
 
-data "oci_exec_test" "helm-install" {
-  digest = var.digest
-  script = "${path.module}/falco-helm-install.sh"
+# data "oci_exec_test" "helm-install" {
+#   digest = var.digest
+#   script = "${path.module}/falco-helm-install.sh"
 
-  env {
-    name  = "IMAGE_REGISTRY"
-    value = data.oci_string.ref.registry
-  }
-  env {
-    name  = "IMAGE_REPOSITORY"
-    value = data.oci_string.ref.repo
-  }
-  env {
-    name  = "IMAGE_TAG"
-    value = data.oci_string.ref.pseudo_tag
-  }
-}
+#   env {
+#     name  = "IMAGE_REGISTRY"
+#     value = data.oci_string.ref.registry
+#   }
+#   env {
+#     name  = "IMAGE_REPOSITORY"
+#     value = data.oci_string.ref.repo
+#   }
+#   env {
+#     name  = "IMAGE_TAG"
+#     value = data.oci_string.ref.pseudo_tag
+#   }
+# }
