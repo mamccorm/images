@@ -185,6 +185,11 @@ spec:
                         "app.kubernetes.io/name": "stargate"
                     topologyKey: "kubernetes.io/hostname"
   medusa:
+    containerImage:
+      registry: ${IMAGE_REGISTRY}
+      repository: ${IMAGE_REPOSITORY}
+      name: ${NAME}
+      tag: ${IMAGE_TAG}
     storageProperties:
       storageProvider: s3_compatible
       bucketName: k8ssandra-medusa
