@@ -34,7 +34,7 @@ retry_command() {
     return 1
 }
 
-# Install cert-manager
+# Dependency: Install cert-manager
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 helm install cert-manager jetstack/cert-manager --namespace ${NAMESPACE} --create-namespace \
@@ -51,9 +51,92 @@ helm install cert-manager jetstack/cert-manager --namespace ${NAMESPACE} --creat
 # Check readiness of cert-manager pods
 retry_command 5 15 "cert-manager pod readiness" "kubectl wait --for=condition=ready pod --selector app.kubernetes.io/instance=cert-manager --namespace ${NAMESPACE} --timeout=1m"
 
-# Install k8ssandra-operator
+
+# Dependency: minio deployment
+# **NOTE**: This approach is a lot more involved, but I aligned with how the
+# upstream maintainer said they setup for testing. See:
+# - https://github.com/k8ssandra/k8ssandra-operator/issues/1185#issuecomment-1906230025
+kubectl apply -n ${NAMESPACE} -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: minio
+  name: minio
+  namespace: ${NAMESPACE}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - name: minio
+        image: quay.io/minio/minio:latest
+        command:
+        - /bin/bash
+        - -c
+        args:
+        - minio server /data --console-address :9090
+        volumeMounts:
+        - mountPath: /data
+          name: localvolume
+      volumes:
+      - name: localvolume
+        emptyDir:
+          sizeLimit: 500Mi
+EOF
+
+# Dependency: minio service
+kubectl apply -n ${NAMESPACE} -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    app: minio
+  ports:
+    - protocol: TCP
+      name: api
+      port: 9000
+      targetPort: 9000
+    - protocol: TCP
+      name: admin-console
+      port: 9090
+      targetPort: 9090
+EOF
+
+# Dependency: Run minio
+kubectl apply -n ${NAMESPACE} -f - <<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: setup-minio
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: setup-minio-pod
+          image: minio/mc
+          command: ["bash", "-c"]
+          args:
+            - |
+              mc alias set k8s-minio http://minio-service.${NAMESPACE}.svc.cluster.local:9000 minioadmin minioadmin
+              mc mb k8s-minio/k8ssandra-medusa
+              mc admin user add k8s-minio k8ssandra k8ssandra
+              mc admin policy attach k8s-minio readwrite --user k8ssandra
+EOF
+
+
+# Dependency: Install k8ssandra-operator
 helm repo add k8ssandra https://helm.k8ssandra.io/stable
-helm repo update
 helm install k8ssandra-operator k8ssandra/k8ssandra-operator \
   --namespace ${NAMESPACE} \
   --create-namespace \
@@ -63,21 +146,6 @@ helm install k8ssandra-operator k8ssandra/k8ssandra-operator \
 
 # Check readiness of k8sandra-operator
 retry_command 5 15 "k8ssandra-operator pod readiness" "kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=k8ssandra-operator --namespace ${NAMESPACE} --timeout=1m"
-
-# Create secret for Medusa
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: medusa-bucket-key
-  namespace: ${NAMESPACE}
-type: Opaque
-stringData:
-  credentials: |-
-    [default]
-    aws_access_key_id = k8ssandra
-    aws_secret_access_key = k8ssandra
-EOF
 
 # Create K8ssandraCluster
 kubectl apply -n ${NAMESPACE} -f - <<EOF
@@ -107,22 +175,39 @@ spec:
         stargate:
           size: 1
           heapSize: 256M
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 1
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        "app.kubernetes.io/name": "stargate"
+                    topologyKey: "kubernetes.io/hostname"
   medusa:
-    containerImage:
-      registry: ${IMAGE_REGISTRY}
-      repository: ${IMAGE_REPOSITORY}
-      name: ${NAME}
-      tag: ${IMAGE_TAG}
-      pullPolicy: Always
     storageProperties:
-    #   storageProvider: s3_compatible
+      storageProvider: s3_compatible
       bucketName: k8ssandra-medusa
       prefix: test
       storageSecretRef:
         name: medusa-bucket-key
-    #   host: minio-service.minio.svc.cluster.local
-    #   port: 9000
+      host: minio-service.${NAMESPACE}.svc.cluster.local
+      port: 9000
       secure: false
+EOF
+
+kubectl apply -n ${NAMESPACE} -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+ name: medusa-bucket-key
+type: Opaque
+stringData:
+ # Note that this currently has to be set to credentials!
+ credentials: |-
+   [default]
+   aws_access_key_id = k8ssandra
+   aws_secret_access_key = k8ssandra
 EOF
 
 # Check readiness of the Cassandra Medusa pod
