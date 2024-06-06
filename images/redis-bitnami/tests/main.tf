@@ -1,7 +1,8 @@
 terraform {
   required_providers {
-    oci  = { source = "chainguard-dev/oci" }
-    helm = { source = "hashicorp/helm" }
+    oci       = { source = "chainguard-dev/oci" }
+    helm      = { source = "hashicorp/helm" }
+    imagetest = { source = "chainguard-dev/imagetest" }
   }
 }
 
@@ -13,7 +14,6 @@ variable "digests" {
     sentinel = string
   })
 }
-
 
 locals { parsed = { for k, v in var.digests : k => provider::oci::parse(v) } }
 
@@ -42,9 +42,9 @@ module "helm" {
 
   values = {
     image = {
-      registry   = local.parsed.registry
-      repository = local.parsed.repo
-      digest     = local.parsed.digest
+      registry   = local.parsed["server"].registry
+      repository = local.parsed["server"].repo
+      digest     = local.parsed["server"].digest
     }
     sentinel = {
       enabled = true
@@ -55,4 +55,20 @@ module "helm" {
       }
     }
   }
+}
+
+resource "imagetest_feature" "basic" {
+  name    = "k3s test"
+  harness = imagetest_harness_k3s.this
+
+  steps = [
+    {
+      name = "Install helm chart"
+      cmd  = module.helm.install_cmd
+    },
+    {
+      name = "test backend"
+      cmd  = "/tests/run-tests.sh"
+    }
+  ]
 }
