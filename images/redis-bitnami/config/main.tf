@@ -76,8 +76,7 @@ output "config" {
       recursive   = true
     }]
     entrypoint = {
-      command = "/opt/bitnami/scripts/${var.name}/entrypoint.sh"
-    },
-    cmd = "/opt/bitnami/scripts/${var.name}/run.sh"
+      command = "/bin/bash -c '/opt/bitnami/scripts/${var.name}/postunpack.sh && /opt/bitnami/scripts/${var.name}/entrypoint.sh && /opt/bitnami/scripts/${var.name}/run.sh'"
+    }
   })
 }

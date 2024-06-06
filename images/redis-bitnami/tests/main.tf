@@ -17,38 +17,42 @@ variable "digests" {
 
 locals { parsed = { for k, v in var.digests : k => provider::oci::parse(v) } }
 
-resource "random_pet" "suffix" {}
+data "imagetest_inventory" "this" {}
 
-resource "helm_release" "redis" {
-  name             = "redis-${random_pet.suffix.id}"
-  namespace        = "redis-system-${random_pet.suffix.id}"
-  chart            = "oci://registry-1.docker.io/bitnamicharts/redis"
-  create_namespace = true
-  timeout          = 600
+resource "imagetest_harness_k3s" "this" {
+  name      = "redis-bitnami"
+  inventory = data.imagetest_inventory.this
 
-  values = [
-    jsonencode({
-      image = {
-        registry   = local.parsed["server"].registry
-        repository = local.parsed["server"].repo
-        digest     = local.parsed["server"].digest
+  sandbox = {
+    mounts = [
+      {
+        source      = path.module
+        destination = "/tests"
       }
-
-      sentinel = {
-        enabled = true
-        image = {
-          registry   = local.parsed["sentinel"].registry
-          repository = local.parsed["sentinel"].repo
-          digest     = local.parsed["sentinel"].digest
-        }
-      }
-    })
-  ]
+    ]
+  }
 }
 
+module "helm" {
+  source = "../../../tflib/imagetest/helm"
 
-module "helm_cleanup" {
-  source    = "../../../tflib/helm-cleanup"
-  name      = helm_release.redis.id
-  namespace = helm_release.redis.namespace
+  name      = "redis"
+  namespace = "redis"
+  chart     = "oci://registry-1.docker.io/bitnamicharts/redis"
+
+  values = {
+    image = {
+      registry   = local.parsed.registry
+      repository = local.parsed.repo
+      digest     = local.parsed.digest
+    }
+    sentinel = {
+      enabled = true
+      image = {
+        registry   = local.parsed["sentinel"].registry
+        repository = local.parsed["sentinel"].repo
+        digest     = local.parsed["sentinel"].digest
+      }
+    }
+  }
 }
